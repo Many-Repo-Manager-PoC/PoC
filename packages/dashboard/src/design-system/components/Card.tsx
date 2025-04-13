@@ -1,11 +1,20 @@
-import { component$, type PropFunction, Slot } from "@builder.io/qwik";
+import {
+  component$,
+  Slot,
+  type PropFunction,
+  type QRL,
+} from "@builder.io/qwik";
 
 export type CardVariant = "default" | "bordered" | "elevated";
 
 export interface CardProps {
   variant?: CardVariant;
   class?: string;
-  onClick$?: PropFunction<(evt: Event) => void>;
+  onClick$?:
+    | PropFunction<(evt: Event) => void>
+    | QRL<(evt: Event) => void>
+    | QRL<() => void>
+    | (QRL<(evt: Event) => void> | QRL<() => void>)[];
 }
 
 export const Card = component$<CardProps>(
