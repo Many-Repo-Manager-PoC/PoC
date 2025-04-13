@@ -1,14 +1,15 @@
-import { component$, Slot } from "@builder.io/qwik";
+import { component$, type PropFunction, Slot } from "@builder.io/qwik";
 
 export type CardVariant = "default" | "bordered" | "elevated";
 
 export interface CardProps {
   variant?: CardVariant;
   class?: string;
+  onClick$?: PropFunction<(evt: Event) => void>;
 }
 
 export const Card = component$<CardProps>(
-  ({ variant = "default", class: className }) => {
+  ({ variant = "default", class: className, onClick$ }) => {
     const baseClasses = "rounded-lg overflow-hidden";
 
     const variantClasses = {
@@ -19,6 +20,7 @@ export const Card = component$<CardProps>(
 
     return (
       <div
+        onClick$={onClick$}
         class={`${baseClasses} ${variantClasses[variant]} ${className || ""}`}
       >
         <Slot />
