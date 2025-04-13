@@ -1,4 +1,10 @@
-import { component$, useSignal, useVisibleTask$ } from "@builder.io/qwik";
+import {
+  component$,
+  NoSerialize,
+  noSerialize,
+  useSignal,
+  useVisibleTask$,
+} from "@builder.io/qwik";
 import { useSession } from "~/routes/plugin@auth.ts";
 import { useNavigate, Link, useLocation } from "@builder.io/qwik-city";
 import { Octokit } from "octokit";
@@ -41,272 +47,237 @@ type MonorepoPackage = {
   devDependencies: { [key: string]: string };
 };
 
-export default component$(() => {
-  const session = useSession();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const owner = location.params.owner;
-  const repoName = location.params.repoName;
+// Type for design system dependencies
+type DesignSystemDependency = {
+  name: string;
+  version: string;
+  repo?: Repository;
+};
 
-  const repository = useSignal<Repository | null>(null);
-  const loading = useSignal(true);
-  const error = useSignal<string | null>(null);
-  const dependentRepos = useSignal<Repository[]>([]);
-  const loadingDependents = useSignal(false);
-  const packageDependencies = useSignal<{ [key: string]: string }>({});
-  const loadingPackageDeps = useSignal(false);
-  const ownerRepositories = useSignal<Repository[]>([]);
-  const loadingOwnerRepos = useSignal(false);
-  const monorepoPackages = useSignal<MonorepoPackage[]>([]);
-  const loadingMonorepo = useSignal(false);
-  const designSystemDeps = useSignal<
-    { name: string; version: string; repo?: Repository }[]
-  >([]);
-  const loadingDesignSystemDeps = useSignal(false);
+// GitHub API utility functions
+const githubUtils = {
+  // Fetch repository details
+  async fetchRepository(
+    octokit: Octokit,
+    owner: string,
+    repo: string
+  ): Promise<Repository> {
+    const { data } = await octokit.rest.repos.get({
+      owner,
+      repo,
+    });
+    return data as Repository;
+  },
 
-  useVisibleTask$(async ({ track }) => {
-    track(() => location.params.owner);
-    track(() => location.params.repoName);
-    if (!session.value?.user) {
-      navigate("/");
-      return;
+  // Fetch package.json content from a repository
+  async fetchPackageJson(
+    octokit: Octokit,
+    owner: string,
+    repo: string,
+    path: string = "package.json",
+    ref?: string
+  ): Promise<{ [key: string]: any } | null> {
+    try {
+      const { data: packageJsonData } = await octokit.rest.repos.getContent({
+        owner,
+        repo,
+        path,
+        ref,
+      });
+
+      if ("content" in packageJsonData) {
+        const content = atob(packageJsonData.content);
+        return JSON.parse(content);
+      }
+      return null;
+    } catch (err) {
+      console.error(`Error fetching package.json from ${owner}/${repo}:`, err);
+      return null;
+    }
+  },
+
+  // Find design system dependencies in package.json
+  async findDesignSystemDependencies(
+    octokit: Octokit,
+    owner: string,
+    repo: string,
+    defaultBranch: string
+  ): Promise<DesignSystemDependency[]> {
+    const packageJson = await this.fetchPackageJson(
+      octokit,
+      owner,
+      repo,
+      "package.json",
+      defaultBranch
+    );
+
+    if (!packageJson) {
+      return [];
     }
 
-    try {
-      // Create a new Octokit instance on the client side
-      const octokit = new Octokit({
-        auth: session.value.user.accessToken,
-      });
+    // Combine dependencies and devDependencies
+    const allDependencies = {
+      ...packageJson.dependencies,
+      ...packageJson.devDependencies,
+    };
 
-      // Fetch repository details
-      const { data } = await octokit.rest.repos.get({
-        owner,
-        repo: repoName,
-      });
+    // Find design system dependencies
+    const designSystems: DesignSystemDependency[] = [];
 
-      repository.value = data as Repository;
+    // Check each dependency
+    for (const [depName, depVersion] of Object.entries(allDependencies)) {
+      // Check if it's a design system package
+      if (
+        depName.includes("design-system") ||
+        depName.includes("ui-kit") ||
+        depName.includes("component-library")
+      ) {
+        // Try to find the repository for this design system
+        let designSystemRepo: Repository | undefined;
 
-      // If this is a design-system repository, fetch dependent repositories
-      if (repository.value.topics?.includes("design-system")) {
-        loadingDependents.value = true;
-        try {
-          // Fetch all repositories for the authenticated user
-          const { data: userRepos } =
-            await octokit.rest.repos.listForAuthenticatedUser({
-              sort: "updated",
-              direction: "desc",
-            });
+        // Check if it's a scoped package from the same organization
+        if (depName.startsWith("@") && depName.includes("/")) {
+          const [scope, packageName] = depName.split("/");
+          const orgName = scope.substring(1); // Remove the @ symbol
 
-          // Filter repositories that might depend on this design system
-          const potentialDependents = userRepos.filter(
-            (repo) => repo.name !== repoName && repo.owner.login === owner
-          );
-
-          // Check package.json files for actual dependencies
-          const actualDependents: Repository[] = [];
-
-          for (const repo of potentialDependents) {
+          // If it's from the same organization, try to find the repo
+          if (orgName === owner) {
             try {
-              // Try to fetch package.json from the repository
-              const { data: packageJsonData } =
-                await octokit.rest.repos.getContent({
-                  owner: repo.owner.login,
-                  repo: repo.name,
-                  path: "package.json",
-                  ref: repo.default_branch || "main",
-                });
-
-              // Parse the package.json content
-              if ("content" in packageJsonData) {
-                const content = atob(packageJsonData.content);
-                const packageJson = JSON.parse(content);
-
-                // Check if this repository depends on our design system
-                const dependencies = {
-                  ...packageJson.dependencies,
-                  ...packageJson.devDependencies,
-                };
-
-                // Check if any dependency matches our design system
-                const dependsOnDesignSystem = Object.keys(dependencies).some(
-                  (dep) => {
-                    // Check for exact match or scoped package match
-                    return (
-                      dep === repoName ||
-                      dep === `@${owner}/${repoName}` ||
-                      dep.includes(repoName)
-                    );
-                  }
-                );
-
-                if (dependsOnDesignSystem) {
-                  actualDependents.push(repo as Repository);
-                }
-              }
+              const { data: repoData } = await octokit.rest.repos.get({
+                owner: orgName,
+                repo: packageName,
+              });
+              designSystemRepo = repoData as Repository;
             } catch (err) {
-              // Skip repositories without package.json or with errors
-              console.log(
-                `Could not check dependencies for ${repo.name}:`,
-                err
-              );
+              console.log(`Could not find repository for ${depName}:`, err);
             }
           }
-
-          dependentRepos.value = actualDependents;
-        } catch (depErr) {
-          console.error("Error fetching dependent repositories:", depErr);
-        } finally {
-          loadingDependents.value = false;
-        }
-      }
-
-      // If this is a package-repo, fetch its dependencies from package.json
-      if (repository.value.topics?.includes("package-repo")) {
-        loadingPackageDeps.value = true;
-        try {
-          // Try to fetch package.json from the repository
-          const { data: packageJsonData } = await octokit.rest.repos.getContent(
-            {
-              owner: repository.value.owner.login,
-              repo: repository.value.name,
-              path: "package.json",
-              ref: repository.value.default_branch || "main",
-            }
-          );
-
-          // Parse the package.json content
-          if ("content" in packageJsonData) {
-            const content = atob(packageJsonData.content);
-            const packageJson = JSON.parse(content);
-
-            // Combine dependencies and devDependencies
-            packageDependencies.value = {
-              ...packageJson.dependencies,
-              ...packageJson.devDependencies,
-            };
+        } else {
+          // Try to find a repository with the same name
+          try {
+            const { data: repoData } = await octokit.rest.repos.get({
+              owner,
+              repo: depName,
+            });
+            designSystemRepo = repoData as Repository;
+          } catch (err) {
+            console.log(`Could not find repository for ${depName}:`, err);
           }
-        } catch (err) {
-          console.error("Error fetching package.json:", err);
-        } finally {
-          loadingPackageDeps.value = false;
         }
-      }
 
-      // If this is a web-app, fetch all repositories from the same owner
-      if (repository.value.topics?.includes("web-app")) {
-        // Find design system dependencies in package.json
-        loadingDesignSystemDeps.value = true;
+        designSystems.push({
+          name: depName,
+          version: depVersion as string,
+          repo: designSystemRepo,
+        });
+      }
+    }
+
+    return designSystems;
+  },
+
+  // Find dependent repositories for a design system
+  async findDependentRepositories(
+    octokit: Octokit,
+    owner: string,
+    repoName: string
+  ): Promise<Repository[]> {
+    try {
+      // Fetch all repositories for the authenticated user
+      const { data: userRepos } =
+        await octokit.rest.repos.listForAuthenticatedUser({
+          sort: "updated",
+          direction: "desc",
+        });
+
+      // Filter repositories that might depend on this design system
+      const potentialDependents = userRepos.filter(
+        (repo) => repo.name !== repoName && repo.owner.login === owner
+      );
+
+      // Check package.json files for actual dependencies
+      const actualDependents: Repository[] = [];
+
+      for (const repo of potentialDependents) {
         try {
           // Try to fetch package.json from the repository
-          const { data: packageJsonData } = await octokit.rest.repos.getContent(
-            {
-              owner: repository.value.owner.login,
-              repo: repository.value.name,
-              path: "package.json",
-              ref: repository.value.default_branch || "main",
-            }
+          const packageJson = await this.fetchPackageJson(
+            octokit,
+            repo.owner.login,
+            repo.name,
+            "package.json",
+            repo.default_branch || "main"
           );
 
-          // Parse the package.json content
-          if ("content" in packageJsonData) {
-            const content = atob(packageJsonData.content);
-            const packageJson = JSON.parse(content);
-
-            // Combine dependencies and devDependencies
-            const allDependencies = {
+          if (packageJson) {
+            // Check if this repository depends on our design system
+            const dependencies = {
               ...packageJson.dependencies,
               ...packageJson.devDependencies,
             };
 
-            // Find design system dependencies
-            const designSystems: {
-              name: string;
-              version: string;
-              repo?: Repository;
-            }[] = [];
-
-            // Check each dependency
-            for (const [depName, depVersion] of Object.entries(
-              allDependencies
-            )) {
-              // Check if it's a design system package
-              // This could be a scoped package like @org/design-system or a direct package
-              if (
-                depName.includes("design-system") ||
-                depName.includes("ui-kit") ||
-                depName.includes("component-library")
-              ) {
-                // Try to find the repository for this design system
-                let designSystemRepo: Repository | undefined;
-
-                // Check if it's a scoped package from the same organization
-                if (depName.startsWith("@") && depName.includes("/")) {
-                  const [scope, packageName] = depName.split("/");
-                  const orgName = scope.substring(1); // Remove the @ symbol
-
-                  // If it's from the same organization, try to find the repo
-                  if (orgName === owner) {
-                    try {
-                      const { data: repoData } = await octokit.rest.repos.get({
-                        owner: orgName,
-                        repo: packageName,
-                      });
-                      designSystemRepo = repoData as Repository;
-                    } catch (err) {
-                      console.log(
-                        `Could not find repository for ${depName}:`,
-                        err
-                      );
-                    }
-                  }
-                } else {
-                  // Try to find a repository with the same name
-                  try {
-                    const { data: repoData } = await octokit.rest.repos.get({
-                      owner,
-                      repo: depName,
-                    });
-                    designSystemRepo = repoData as Repository;
-                  } catch (err) {
-                    console.log(
-                      `Could not find repository for ${depName}:`,
-                      err
-                    );
-                  }
-                }
-
-                designSystems.push({
-                  name: depName,
-                  version: depVersion as string,
-                  repo: designSystemRepo,
-                });
+            // Check if any dependency matches our design system
+            const dependsOnDesignSystem = Object.keys(dependencies).some(
+              (dep) => {
+                // Check for exact match or scoped package match
+                return (
+                  dep === repoName ||
+                  dep === `@${owner}/${repoName}` ||
+                  dep.includes(repoName)
+                );
               }
-            }
+            );
 
-            designSystemDeps.value = designSystems;
+            if (dependsOnDesignSystem) {
+              actualDependents.push(repo as Repository);
+            }
           }
         } catch (err) {
-          console.error("Error fetching design system dependencies:", err);
-        } finally {
-          loadingDesignSystemDeps.value = false;
+          // Skip repositories without package.json or with errors
+          console.log(`Could not check dependencies for ${repo.name}:`, err);
         }
       }
 
-      // If this is a mono-repo, search for package.json files in nested directories
-      if (repository.value?.topics?.includes("mono-repo")) {
-        loadingMonorepo.value = true;
-        try {
-          // Function to recursively search for package.json files
+      return actualDependents;
+    } catch (err) {
+      console.error("Error fetching dependent repositories:", err);
+      return [];
+    }
+  },
+
+  // Find monorepo packages in packages directory
+  async findMonorepoPackages(
+    octokit: Octokit,
+    owner: string,
+    repo: string,
+    defaultBranch: string
+  ): Promise<MonorepoPackage[]> {
+    try {
+      // First, check if there's a packages directory
+      const { data: rootContents } = await octokit.rest.repos.getContent({
+        owner,
+        repo,
+        path: "",
+        ref: defaultBranch,
+      });
+
+      if (Array.isArray(rootContents)) {
+        const packagesDir = rootContents.find(
+          (item) => item.name === "packages" && item.type === "dir"
+        );
+
+        if (packagesDir) {
+          // Function to search for package.json files in packages directory
           const findPackageJsonFiles = async (
-            path = ""
+            path = "packages"
           ): Promise<MonorepoPackage[]> => {
             try {
               // Get the contents of the current directory
               const { data: contents } = await octokit.rest.repos.getContent({
-                owner: repository.value?.owner.login || "",
-                repo: repository.value?.name || "",
+                owner,
+                repo,
                 path,
-                ref: repository.value?.default_branch || "main",
+                ref: defaultBranch,
               });
 
               const packages: MonorepoPackage[] = [];
@@ -330,7 +301,7 @@ export default component$(() => {
                     if (packageJson.name) {
                       packages.push({
                         name: packageJson.name,
-                        path: path || "/",
+                        path: path,
                         dependencies: packageJson.dependencies || {},
                         devDependencies: packageJson.devDependencies || {},
                       });
@@ -346,7 +317,7 @@ export default component$(() => {
                 // Recursively search subdirectories
                 for (const item of contents) {
                   if (item.type === "dir" && !item.name.startsWith(".")) {
-                    const subPath = path ? `${path}/${item.name}` : item.name;
+                    const subPath = `${path}/${item.name}`;
                     const subPackages = await findPackageJsonFiles(subPath);
                     packages.push(...subPackages);
                   }
@@ -360,8 +331,258 @@ export default component$(() => {
             }
           };
 
-          // Start the search from the root
-          monorepoPackages.value = await findPackageJsonFiles();
+          // Start the search from the packages directory
+          return await findPackageJsonFiles();
+        } else {
+          // If no packages directory is found, fall back to searching the entire repo
+          console.log(
+            "No packages directory found, searching entire repository"
+          );
+          return await this.findPackagesInEntireRepo(
+            octokit,
+            owner,
+            repo,
+            defaultBranch
+          );
+        }
+      }
+    } catch (err) {
+      console.error("Error checking for packages directory:", err);
+      // Fall back to searching the entire repository
+      return await this.findPackagesInEntireRepo(
+        octokit,
+        owner,
+        repo,
+        defaultBranch
+      );
+    }
+  },
+
+  // Find packages in the entire repository (fallback)
+  async findPackagesInEntireRepo(
+    octokit: Octokit,
+    owner: string,
+    repo: string,
+    defaultBranch: string
+  ): Promise<MonorepoPackage[]> {
+    const findPackageJsonFiles = async (
+      path = ""
+    ): Promise<MonorepoPackage[]> => {
+      try {
+        // Get the contents of the current directory
+        const { data: contents } = await octokit.rest.repos.getContent({
+          owner,
+          repo,
+          path,
+          ref: defaultBranch,
+        });
+
+        const packages: MonorepoPackage[] = [];
+
+        // If the response is an array, it's a directory
+        if (Array.isArray(contents)) {
+          // Check if there's a package.json in this directory
+          const packageJsonFile = contents.find(
+            (item) => item.name === "package.json"
+          );
+          if (
+            packageJsonFile &&
+            "content" in packageJsonFile &&
+            packageJsonFile.content
+          ) {
+            try {
+              const content = atob(packageJsonFile.content);
+              const packageJson = JSON.parse(content);
+
+              // Only include if it has a name (to avoid root package.json)
+              if (packageJson.name) {
+                packages.push({
+                  name: packageJson.name,
+                  path: path || "/",
+                  dependencies: packageJson.dependencies || {},
+                  devDependencies: packageJson.devDependencies || {},
+                });
+              }
+            } catch (err) {
+              console.error(`Error parsing package.json at ${path}:`, err);
+            }
+          }
+
+          // Recursively search subdirectories
+          for (const item of contents) {
+            if (item.type === "dir" && !item.name.startsWith(".")) {
+              const subPath = path ? `${path}/${item.name}` : item.name;
+              const subPackages = await findPackageJsonFiles(subPath);
+              packages.push(...subPackages);
+            }
+          }
+        }
+
+        return packages;
+      } catch (err) {
+        console.error(`Error searching directory ${path}:`, err);
+        return [];
+      }
+    };
+
+    // Start the search from the root
+    return await findPackageJsonFiles();
+  },
+};
+
+export default component$(() => {
+  const session = useSession();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const owner = location.params.owner;
+  const repoName = location.params.repoName;
+
+  const repository = useSignal<Repository | null>(null);
+  const loading = useSignal(true);
+  const error = useSignal<string | null>(null);
+  const dependentRepos = useSignal<Repository[]>([]);
+  const loadingDependents = useSignal(false);
+  const packageDependencies = useSignal<{ [key: string]: string }>({});
+  const loadingPackageDeps = useSignal(false);
+  const ownerRepositories = useSignal<Repository[]>([]);
+  const loadingOwnerRepos = useSignal(false);
+  const monorepoPackages = useSignal<MonorepoPackage[]>([]);
+  const loadingMonorepo = useSignal(false);
+  const designSystemDeps = useSignal<DesignSystemDependency[]>([]);
+  const loadingDesignSystemDeps = useSignal(false);
+  const octokit = useSignal<NoSerialize<Octokit> | null>(null);
+  const topics = useSignal<string[]>([]);
+
+  useVisibleTask$(async ({ track }) => {
+    track(() => location.params.owner);
+    track(() => location.params.repoName);
+
+    octokit.value = noSerialize(
+      new Octokit({
+        auth: session.value?.user?.accessToken,
+      })
+    );
+  });
+  useVisibleTask$(async ({ track }) => {
+    track(() => location.params.owner);
+    track(() => location.params.repoName);
+    track(() => octokit.value);
+
+    if (!octokit.value) {
+      return;
+    }
+
+    repository.value = await githubUtils.fetchRepository(
+      octokit.value,
+      owner,
+      repoName
+    );
+
+    // Update topics signal when repository changes
+    topics.value = repository.value?.topics || [];
+  });
+
+  // Add a separate useVisibleTask$ to handle navigation between repositories
+  useVisibleTask$(({ track }) => {
+    // Track owner and repoName changes
+    track(() => location.params.owner);
+    track(() => location.params.repoName);
+
+    // Reset topics when navigating to a new repository
+    // This ensures the UI updates properly when switching between repositories
+    topics.value = [];
+  });
+
+  useVisibleTask$(async ({ track }) => {
+    track(() => location.params.owner);
+    track(() => location.params.repoName);
+    track(() => octokit.value);
+    track(() => topics.value);
+
+    if (!octokit.value) {
+      return;
+    }
+
+    try {
+      // Reset all loading states and data when topics change
+      loadingDependents.value = false;
+      loadingPackageDeps.value = false;
+      loadingDesignSystemDeps.value = false;
+      loadingMonorepo.value = false;
+
+      // Use the topics signal directly
+      const currentTopics = topics.value;
+
+      // If this is a design-system repository, fetch dependent repositories
+      if (currentTopics.includes("design-system")) {
+        loadingDependents.value = true;
+        try {
+          dependentRepos.value = await githubUtils.findDependentRepositories(
+            octokit.value,
+            owner,
+            repoName
+          );
+        } catch (depErr) {
+          console.error("Error fetching dependent repositories:", depErr);
+        } finally {
+          loadingDependents.value = false;
+        }
+      }
+
+      // If this is a package-repo, fetch its dependencies from package.json
+      if (currentTopics.includes("package-repo")) {
+        loadingPackageDeps.value = true;
+        try {
+          const packageJson = await githubUtils.fetchPackageJson(
+            octokit.value,
+            owner,
+            repoName,
+            "package.json",
+            repository.value?.default_branch || "main"
+          );
+
+          if (packageJson) {
+            // Combine dependencies and devDependencies
+            packageDependencies.value = {
+              ...packageJson.dependencies,
+              ...packageJson.devDependencies,
+            };
+          }
+        } catch (err) {
+          console.error("Error fetching package.json:", err);
+        } finally {
+          loadingPackageDeps.value = false;
+        }
+      }
+
+      // If this is a web-app, find design system dependencies
+      if (currentTopics.includes("web-app")) {
+        loadingDesignSystemDeps.value = true;
+        try {
+          designSystemDeps.value =
+            await githubUtils.findDesignSystemDependencies(
+              octokit.value,
+              owner,
+              repoName,
+              repository.value?.default_branch || "main"
+            );
+        } catch (err) {
+          console.error("Error fetching design system dependencies:", err);
+        } finally {
+          loadingDesignSystemDeps.value = false;
+        }
+      }
+
+      // If this is a mono-repo, search for package.json files in packages/ folders
+      if (currentTopics.includes("mono-repo")) {
+        loadingMonorepo.value = true;
+        try {
+          monorepoPackages.value = await githubUtils.findMonorepoPackages(
+            octokit.value,
+            owner,
+            repoName,
+            repository.value?.default_branch || "main"
+          );
         } catch (err) {
           console.error("Error searching for monorepo packages:", err);
         } finally {
@@ -433,12 +654,12 @@ export default component$(() => {
                   </h1>
                   <p class="text-gray-400 text-sm">
                     by{" "}
-                    <Link
+                    <a
                       href={`/repositories/${repository.value.owner.login}`}
                       class="text-blue-400 hover:text-blue-300"
                     >
                       {repository.value.owner.login}
-                    </Link>
+                    </a>
                   </p>
                 </div>
               </div>
@@ -525,29 +746,28 @@ export default component$(() => {
                     </div>
                   </div>
 
-                  {repository.value.topics &&
-                    repository.value.topics.length > 0 && (
-                      <div class="mt-4">
-                        <h3 class="text-sm font-medium text-gray-400 mb-2">
-                          Topics
-                        </h3>
-                        <div class="flex flex-wrap gap-2">
-                          {repository.value.topics.map((topic) => (
-                            <span
-                              key={topic}
-                              class="bg-gray-600 text-gray-200 text-xs px-2 py-1 rounded-full"
-                            >
-                              {topic}
-                            </span>
-                          ))}
-                        </div>
+                  {topics.value && topics.value.length > 0 && (
+                    <div class="mt-4">
+                      <h3 class="text-sm font-medium text-gray-400 mb-2">
+                        Topics
+                      </h3>
+                      <div class="flex flex-wrap gap-2">
+                        {topics.value.map((topic) => (
+                          <span
+                            key={topic}
+                            class="bg-gray-600 text-gray-200 text-xs px-2 py-1 rounded-full"
+                          >
+                            {topic}
+                          </span>
+                        ))}
                       </div>
-                    )}
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Monorepo Packages Section - Only shown for mono-repo repositories */}
-              {repository.value.topics?.includes("mono-repo") && (
+              {topics.value?.includes("mono-repo") && (
                 <div class="bg-gray-700 p-4 rounded-lg mb-6">
                   <h2 class="text-base font-semibold text-white mb-2">
                     Monorepo Packages
@@ -641,7 +861,7 @@ export default component$(() => {
               )}
 
               {/* Package Dependencies Section - Only shown for package-repo repositories */}
-              {repository.value.topics?.includes("package-repo") && (
+              {topics.value?.includes("package-repo") && (
                 <div class="bg-gray-700 p-4 rounded-lg mb-6">
                   <h2 class="text-base font-semibold text-white mb-2">
                     Package Dependencies
@@ -675,7 +895,7 @@ export default component$(() => {
               )}
 
               {/* Dependent Repositories Section - Only shown for design-system repositories */}
-              {repository.value.topics?.includes("design-system") && (
+              {topics.value?.includes("design-system") && (
                 <div class="bg-gray-700 p-4 rounded-lg mb-6">
                   <h2 class="text-base font-semibold text-white mb-2">
                     Actual Dependent Repositories
@@ -694,12 +914,12 @@ export default component$(() => {
                         <div key={repo.id} class="bg-gray-800 p-3 rounded-md">
                           <div class="flex justify-between items-center">
                             <div>
-                              <Link
+                              <a
                                 href={`/repositories/${repo.owner.login}/${repo.name}`}
                                 class="text-blue-400 hover:text-blue-300 font-medium"
                               >
                                 {repo.name}
-                              </Link>
+                              </a>
                               {repo.description && (
                                 <p class="text-gray-400 text-xs mt-1">
                                   {repo.description}
@@ -738,7 +958,7 @@ export default component$(() => {
               )}
 
               {/* Design System Dependencies Section - Only shown for web-app repositories */}
-              {repository.value.topics?.includes("web-app") && (
+              {topics.value?.includes("web-app") && (
                 <div class="bg-gray-700 p-4 rounded-lg mb-6">
                   <h2 class="text-base font-semibold text-white mb-2">
                     Design System Dependencies
@@ -757,12 +977,12 @@ export default component$(() => {
                           <div class="flex justify-between items-center">
                             <div>
                               {dep.repo ? (
-                                <Link
+                                <a
                                   href={`/repositories/${dep.repo.owner.login}/${dep.repo.name}`}
                                   class="text-blue-400 hover:text-blue-300 font-medium"
                                 >
                                   {dep.name}
-                                </Link>
+                                </a>
                               ) : (
                                 <span class="text-blue-400 font-medium">
                                   {dep.name}
