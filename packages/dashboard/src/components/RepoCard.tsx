@@ -1,6 +1,12 @@
 import { component$, type PropFunction, type QRL, $ } from "@builder.io/qwik";
 import { Link } from "@builder.io/qwik-city";
-import { Card, CardBody, CardFooter, Button, Tag } from "~/design-system";
+import {
+  Card,
+  CardBody,
+  CardFooter,
+  Button,
+  Tag,
+} from "~/components/design-system";
 
 export interface Repository {
   id: number;

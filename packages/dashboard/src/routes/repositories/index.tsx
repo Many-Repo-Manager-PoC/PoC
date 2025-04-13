@@ -17,7 +17,7 @@ import {
   Button,
   Avatar,
   Collapsible,
-} from "~/design-system";
+} from "~/components/design-system";
 import { RepoCard, type Repository } from "~/components/RepoCard";
 
 // Extend the User type to include accessToken
