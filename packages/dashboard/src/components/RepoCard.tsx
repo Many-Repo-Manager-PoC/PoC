@@ -20,12 +20,14 @@ export interface RepoCardProps {
   repo: Repository;
   selectedTopic?: string | null;
   onTopicClick$?: PropFunction<(topic: string) => void>;
+  onClick$?: PropFunction<(evt: Event) => void>;
 }
 
 export const RepoCard = component$<RepoCardProps>(
-  ({ repo, selectedTopic, onTopicClick$ }) => {
+  ({ repo, selectedTopic, onTopicClick$, onClick$ }) => {
     return (
       <Card
+        onClick$={onClick$}
         variant="elevated"
         class="hover:shadow-xl transition-shadow flex flex-col h-full"
       >

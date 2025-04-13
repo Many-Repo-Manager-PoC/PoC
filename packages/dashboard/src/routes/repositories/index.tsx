@@ -4,6 +4,7 @@ import {
   useVisibleTask$,
   $,
   type Component,
+  sync$,
 } from "@builder.io/qwik";
 import { useSession } from "~/routes/plugin@auth.ts";
 import { useNavigate } from "@builder.io/qwik-city";
@@ -33,17 +34,21 @@ interface GroupedRepositories {
   };
 }
 
+// Hardcoded array of pinned repositories in order of priority
+const PINNED_ORGS = ["Many-Repo-Manager-PoC"];
+
 export default component$(() => {
   const session = useSession();
   const navigate = useNavigate();
 
   const repositories = useSignal<Repository[]>([]);
   const filteredRepositories = useSignal<Repository[]>([]);
-  const groupedRepositories = useSignal<GroupedRepositories>({});
+  const pinnedRepositories = useSignal<GroupedRepositories>({});
+  const personalRepositories = useSignal<GroupedRepositories>({});
+  const otherRepositories = useSignal<GroupedRepositories>({});
   const loading = useSignal(true);
   const error = useSignal<string | null>(null);
   const selectedTopic = useSignal<string | null>(null);
-  const expandedOwners = useSignal<Set<string>>(new Set());
 
   // Filter repositories by selected topic
   const filterRepositories = $(() => {
@@ -65,32 +70,75 @@ export default component$(() => {
     filterRepositories();
   });
 
-  const toggleOwner = $((owner: string) => {
-    const newExpandedOwners = new Set(expandedOwners.value);
-    if (newExpandedOwners.has(owner)) {
-      newExpandedOwners.delete(owner);
-    } else {
-      newExpandedOwners.add(owner);
-    }
-    expandedOwners.value = newExpandedOwners;
+  const handleOwnerClick = $((owner: string) => {
+    navigate(`/repositories/${owner}`);
   });
 
-  const groupRepositories = $((repos: Repository[]) => {
-    const grouped: GroupedRepositories = {};
+  const categorizeRepositories = $((repos: Repository[]) => {
+    const pinned: GroupedRepositories = {};
+    const personal: GroupedRepositories = {};
+    const other: GroupedRepositories = {};
+
+    const userLogin = session.value?.user?.name || "";
+
+    // Group repositories by owner
     for (const repo of repos) {
-      if (!grouped[repo.owner.login]) {
-        grouped[repo.owner.login] = {
+      const owner = repo.owner.login;
+
+      // Initialize owner groups if they don't exist
+      if (!pinned[owner] && !personal[owner] && !other[owner]) {
+        const ownerGroup = {
           avatar_url: "", // Default empty string since avatar_url is not in the type
           repositories: [],
         };
-      }
-      grouped[repo.owner.login].repositories.push(repo);
-    }
-    groupedRepositories.value = grouped;
-  });
 
-  const handleOwnerClick = $((owner: string) => {
-    navigate(`/repositories/${owner}`);
+        // Determine which group this owner belongs to
+        if (PINNED_ORGS.includes(owner)) {
+          pinned[owner] = { ...ownerGroup };
+        } else if (owner === userLogin) {
+          personal[owner] = { ...ownerGroup };
+        } else {
+          other[owner] = { ...ownerGroup };
+        }
+      }
+
+      // Add repository to the appropriate group
+      if (PINNED_ORGS.includes(owner)) {
+        pinned[owner].repositories.push(repo);
+      } else if (owner === userLogin) {
+        personal[owner].repositories.push(repo);
+      } else {
+        other[owner].repositories.push(repo);
+      }
+    }
+
+    // Sort repositories within each group by updated_at date
+    const sortRepositories = (group: GroupedRepositories) => {
+      for (const owner in group) {
+        group[owner].repositories.sort((a, b) => {
+          // If both are pinned, sort by their order in the PINNED_ORGS array
+          const aIndex = PINNED_ORGS.indexOf(a.name);
+          const bIndex = PINNED_ORGS.indexOf(b.name);
+
+          if (aIndex !== -1 && bIndex !== -1) {
+            return aIndex - bIndex;
+          }
+
+          // Otherwise sort by updated_at date
+          return (
+            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+          );
+        });
+      }
+    };
+
+    sortRepositories(pinned);
+    sortRepositories(personal);
+    sortRepositories(other);
+
+    pinnedRepositories.value = pinned;
+    personalRepositories.value = personal;
+    otherRepositories.value = other;
   });
 
   useVisibleTask$(async () => {
@@ -111,7 +159,7 @@ export default component$(() => {
 
       repositories.value = data as Repository[];
       filteredRepositories.value = repositories.value;
-      groupRepositories(repositories.value);
+      categorizeRepositories(repositories.value);
     } catch (err) {
       error.value =
         err instanceof Error ? err.message : "Unknown error occurred";
@@ -145,12 +193,64 @@ export default component$(() => {
     )
   );
 
+  const RepositorySection = component$<{
+    title: string;
+    repositories: GroupedRepositories;
+  }>(({ title, repositories }) => {
+    if (Object.keys(repositories).length === 0) return null;
+
+    return (
+      <div class="mb-8">
+        <h3 class="text-lg font-bold text-white mb-4">{title}</h3>
+        <div class="space-y-6">
+          {Object.entries(repositories).map(([owner, data]) => {
+            return (
+              <Collapsible
+                key={owner}
+                title={
+                  <OwnerTitle owner={owner} avatar_url={data.avatar_url} />
+                }
+                subtitle={`${data.repositories.length} repositories`}
+                onTitleClick$={() => handleOwnerClick(owner)}
+              >
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {data.repositories.map((repo) => {
+                    const repoName = repo.name;
+                    return (
+                      <div key={repo.id} class="relative">
+                        {PINNED_ORGS.includes(repo.name) && (
+                          <div class="absolute -top-2 -right-2 z-10 bg-blue-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-md">
+                            Pinned
+                          </div>
+                        )}
+                        <RepoCard
+                          repo={repo}
+                          onClick$={sync$((evt: Event) => {
+                            evt.stopPropagation();
+                            evt.preventDefault();
+                            console.log("clicked", repoName);
+                          })}
+                          selectedTopic={selectedTopic.value}
+                          onTopicClick$={handleTopicClick}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </Collapsible>
+            );
+          })}
+        </div>
+      </div>
+    );
+  });
+
   return (
     <div class="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 p-8">
       <div class="max-w-7xl mx-auto">
         <Breadcrumb items={breadcrumbItems} class="mb-6" />
 
-        <h2 class="text-lg font-bold text-white mb-6">Your Repositories</h2>
+        {/* <h2 class="text-lg font-bold text-white mb-6">Your Repositories</h2> */}
 
         {loading.value ? (
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -193,29 +293,20 @@ export default component$(() => {
             </CardBody>
           </Card>
         ) : (
-          <div class="space-y-6">
-            {Object.entries(groupedRepositories.value).map(([owner, data]) => (
-              <Collapsible
-                key={owner}
-                title={
-                  <OwnerTitle owner={owner} avatar_url={data.avatar_url} />
-                }
-                subtitle={`${data.repositories.length} repositories`}
-                onTitleClick$={() => handleOwnerClick(owner)}
-              >
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {data.repositories.map((repo) => (
-                    <RepoCard
-                      key={repo.id}
-                      repo={repo}
-                      selectedTopic={selectedTopic.value}
-                      onTopicClick$={handleTopicClick}
-                    />
-                  ))}
-                </div>
-              </Collapsible>
-            ))}
-          </div>
+          <>
+            <RepositorySection
+              title="Pinned Repositories"
+              repositories={pinnedRepositories.value}
+            />
+            <RepositorySection
+              title="Your Repositories"
+              repositories={personalRepositories.value}
+            />
+            <RepositorySection
+              title="Other Repositories"
+              repositories={otherRepositories.value}
+            />
+          </>
         )}
       </div>
     </div>
