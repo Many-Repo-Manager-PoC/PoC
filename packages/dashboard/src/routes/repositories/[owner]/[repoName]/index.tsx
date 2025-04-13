@@ -194,92 +194,62 @@ export default component$(() => {
 
       // If this is a web-app, fetch all repositories from the same owner
       if (repository.value.topics?.includes("web-app")) {
-        loadingOwnerRepos.value = true;
+        // Find design system dependencies in package.json
+        loadingDesignSystemDeps.value = true;
         try {
-          // Fetch all repositories for the owner
-          const { data: ownerRepos } = await octokit.rest.repos.listForUser({
-            username: owner,
-            sort: "updated",
-            direction: "desc",
-          });
+          // Try to fetch package.json from the repository
+          const { data: packageJsonData } = await octokit.rest.repos.getContent(
+            {
+              owner: repository.value.owner.login,
+              repo: repository.value.name,
+              path: "package.json",
+              ref: repository.value.default_branch || "main",
+            }
+          );
 
-          // Filter out the current repository
-          ownerRepositories.value = ownerRepos.filter(
-            (repo) => repo.name !== repoName
-          ) as Repository[];
+          // Parse the package.json content
+          if ("content" in packageJsonData) {
+            const content = atob(packageJsonData.content);
+            const packageJson = JSON.parse(content);
 
-          // Find design system dependencies in package.json
-          loadingDesignSystemDeps.value = true;
-          try {
-            // Try to fetch package.json from the repository
-            const { data: packageJsonData } =
-              await octokit.rest.repos.getContent({
-                owner: repository.value.owner.login,
-                repo: repository.value.name,
-                path: "package.json",
-                ref: repository.value.default_branch || "main",
-              });
+            // Combine dependencies and devDependencies
+            const allDependencies = {
+              ...packageJson.dependencies,
+              ...packageJson.devDependencies,
+            };
 
-            // Parse the package.json content
-            if ("content" in packageJsonData) {
-              const content = atob(packageJsonData.content);
-              const packageJson = JSON.parse(content);
+            // Find design system dependencies
+            const designSystems: {
+              name: string;
+              version: string;
+              repo?: Repository;
+            }[] = [];
 
-              // Combine dependencies and devDependencies
-              const allDependencies = {
-                ...packageJson.dependencies,
-                ...packageJson.devDependencies,
-              };
+            // Check each dependency
+            for (const [depName, depVersion] of Object.entries(
+              allDependencies
+            )) {
+              // Check if it's a design system package
+              // This could be a scoped package like @org/design-system or a direct package
+              if (
+                depName.includes("design-system") ||
+                depName.includes("ui-kit") ||
+                depName.includes("component-library")
+              ) {
+                // Try to find the repository for this design system
+                let designSystemRepo: Repository | undefined;
 
-              // Find design system dependencies
-              const designSystems: {
-                name: string;
-                version: string;
-                repo?: Repository;
-              }[] = [];
+                // Check if it's a scoped package from the same organization
+                if (depName.startsWith("@") && depName.includes("/")) {
+                  const [scope, packageName] = depName.split("/");
+                  const orgName = scope.substring(1); // Remove the @ symbol
 
-              // Check each dependency
-              for (const [depName, depVersion] of Object.entries(
-                allDependencies
-              )) {
-                // Check if it's a design system package
-                // This could be a scoped package like @org/design-system or a direct package
-                if (
-                  depName.includes("design-system") ||
-                  depName.includes("ui-kit") ||
-                  depName.includes("component-library")
-                ) {
-                  // Try to find the repository for this design system
-                  let designSystemRepo: Repository | undefined;
-
-                  // Check if it's a scoped package from the same organization
-                  if (depName.startsWith("@") && depName.includes("/")) {
-                    const [scope, packageName] = depName.split("/");
-                    const orgName = scope.substring(1); // Remove the @ symbol
-
-                    // If it's from the same organization, try to find the repo
-                    if (orgName === owner) {
-                      try {
-                        const { data: repoData } = await octokit.rest.repos.get(
-                          {
-                            owner: orgName,
-                            repo: packageName,
-                          }
-                        );
-                        designSystemRepo = repoData as Repository;
-                      } catch (err) {
-                        console.log(
-                          `Could not find repository for ${depName}:`,
-                          err
-                        );
-                      }
-                    }
-                  } else {
-                    // Try to find a repository with the same name
+                  // If it's from the same organization, try to find the repo
+                  if (orgName === owner) {
                     try {
                       const { data: repoData } = await octokit.rest.repos.get({
-                        owner,
-                        repo: depName,
+                        owner: orgName,
+                        repo: packageName,
                       });
                       designSystemRepo = repoData as Repository;
                     } catch (err) {
@@ -289,26 +259,36 @@ export default component$(() => {
                       );
                     }
                   }
-
-                  designSystems.push({
-                    name: depName,
-                    version: depVersion as string,
-                    repo: designSystemRepo,
-                  });
+                } else {
+                  // Try to find a repository with the same name
+                  try {
+                    const { data: repoData } = await octokit.rest.repos.get({
+                      owner,
+                      repo: depName,
+                    });
+                    designSystemRepo = repoData as Repository;
+                  } catch (err) {
+                    console.log(
+                      `Could not find repository for ${depName}:`,
+                      err
+                    );
+                  }
                 }
-              }
 
-              designSystemDeps.value = designSystems;
+                designSystems.push({
+                  name: depName,
+                  version: depVersion as string,
+                  repo: designSystemRepo,
+                });
+              }
             }
-          } catch (err) {
-            console.error("Error fetching design system dependencies:", err);
-          } finally {
-            loadingDesignSystemDeps.value = false;
+
+            designSystemDeps.value = designSystems;
           }
         } catch (err) {
-          console.error("Error fetching owner repositories:", err);
+          console.error("Error fetching design system dependencies:", err);
         } finally {
-          loadingOwnerRepos.value = false;
+          loadingDesignSystemDeps.value = false;
         }
       }
 
@@ -752,68 +732,6 @@ export default component$(() => {
                   ) : (
                     <p class="text-gray-400 text-sm">
                       No repositories found that depend on this design system.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Related Repositories Section - Only shown for web-app repositories */}
-              {repository.value.topics?.includes("web-app") && (
-                <div class="bg-gray-700 p-4 rounded-lg mb-6">
-                  <h2 class="text-base font-semibold text-white mb-2">
-                    Related Repositories
-                  </h2>
-                  <p class="text-gray-400 text-sm mb-3">
-                    Other repositories from {owner} that might be related
-                  </p>
-                  {loadingOwnerRepos.value ? (
-                    <div class="flex justify-center items-center h-24">
-                      <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
-                    </div>
-                  ) : ownerRepositories.value.length > 0 ? (
-                    <div class="space-y-3">
-                      {ownerRepositories.value.map((repo) => (
-                        <div key={repo.id} class="bg-gray-800 p-3 rounded-md">
-                          <div class="flex justify-between items-center">
-                            <div>
-                              <Link
-                                href={`/repositories/${repo.owner.login}/${repo.name}`}
-                                class="text-blue-400 hover:text-blue-300 font-medium"
-                              >
-                                {repo.name}
-                              </Link>
-                              {repo.description && (
-                                <p class="text-gray-400 text-xs mt-1">
-                                  {repo.description}
-                                </p>
-                              )}
-                            </div>
-                            <div class="flex items-center space-x-2">
-                              {repo.topics && repo.topics.length > 0 && (
-                                <div class="flex flex-wrap gap-1">
-                                  {repo.topics.slice(0, 2).map((topic) => (
-                                    <span
-                                      key={topic}
-                                      class="bg-gray-700 text-gray-300 text-xs px-2 py-0.5 rounded-full"
-                                    >
-                                      {topic}
-                                    </span>
-                                  ))}
-                                  {repo.topics.length > 2 && (
-                                    <span class="text-gray-500 text-xs">
-                                      +{repo.topics.length - 2}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p class="text-gray-400 text-sm">
-                      No other repositories found from {owner}.
                     </p>
                   )}
                 </div>
