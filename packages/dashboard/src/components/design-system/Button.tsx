@@ -1,6 +1,6 @@
 import { component$, Slot } from "@builder.io/qwik";
 import { Link } from "@builder.io/qwik-city";
-import { withAsChild, type AsChildProps } from "../utils/asChild";
+import { withAsChild, type AsChildProps } from "./utils/asChild";
 import { Spinner } from "./Spinner";
 
 export type ButtonVariant =

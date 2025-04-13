@@ -1,6 +1,6 @@
 import { component$ } from "@builder.io/qwik";
 import { Link } from "@builder.io/qwik-city";
-import { LoginButton } from "../auth/LoginButton";
+import { LoginButton } from "./LoginButton";
 
 export const Header = component$(() => {
   return (

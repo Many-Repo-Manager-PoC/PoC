@@ -6,7 +6,7 @@ import {
   type Component,
   type JSXOutput,
 } from "@builder.io/qwik";
-import { Card, CardBody } from "~/design-system";
+import { Card, CardBody } from "~/components/design-system";
 
 export interface CollapsibleProps {
   title: string | Component | JSXOutput;

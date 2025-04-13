@@ -2,7 +2,13 @@ import { component$, useSignal, useVisibleTask$, $ } from "@builder.io/qwik";
 import { useSession } from "~/routes/plugin@auth.ts";
 import { useNavigate, useLocation } from "@builder.io/qwik-city";
 import { Octokit } from "octokit";
-import { Breadcrumb, Card, CardBody, Avatar, Skeleton } from "~/design-system";
+import {
+  Breadcrumb,
+  Card,
+  CardBody,
+  Avatar,
+  Skeleton,
+} from "~/components/design-system";
 import { RepoCard, type Repository } from "~/components/RepoCard";
 
 export default component$(() => {
