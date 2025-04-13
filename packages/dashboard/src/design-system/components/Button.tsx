@@ -1,6 +1,7 @@
 import { component$, Slot } from "@builder.io/qwik";
 import { Link } from "@builder.io/qwik-city";
 import { withAsChild, type AsChildProps } from "../utils/asChild";
+import { Spinner } from "./Spinner";
 
 export type ButtonVariant =
   | "primary"
@@ -67,7 +68,9 @@ const BaseButton = component$<ButtonProps>(
     const buttonClasses = `${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${widthClass} ${className || ""}`;
 
     const loadingSpinner = isLoading ? (
-      <div class="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      <div class="mr-2">
+        <Spinner size="sm" />
+      </div>
     ) : null;
 
     if (href) {

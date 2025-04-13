@@ -224,14 +224,21 @@ export default component$(() => {
                           </div>
                         )}
                         <RepoCard
+                          variant="readonly"
                           repo={repo}
-                          onClick$={sync$((evt: Event) => {
-                            evt.stopPropagation();
-                            evt.preventDefault();
-                            console.log("clicked", repoName);
-                          })}
+                          onClick$={[
+                            sync$((evt: Event) => {
+                              evt.stopPropagation();
+                              evt.preventDefault();
+                              console.log("clicked", repoName);
+                            }),
+                            $(() => {
+                              navigate(
+                                `/repositories/${repo.owner.login}/${repo.name}`
+                              );
+                            }),
+                          ]}
                           selectedTopic={selectedTopic.value}
-                          onTopicClick$={handleTopicClick}
                         />
                       </div>
                     );
