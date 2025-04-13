@@ -3,7 +3,7 @@ import { routeLoader$ } from "@builder.io/qwik-city";
 import type { RequestHandler } from "@builder.io/qwik-city";
 import { Header } from "~/components/header/Header";
 
-import styles from "./styles.css?inline";
+// import styles from "./styles.css?inline";
 
 export const onGet: RequestHandler = async ({ cacheControl }) => {
   // Control caching for this request for best performance and to reduce hosting costs:
@@ -23,7 +23,7 @@ export const useServerTimeLoader = routeLoader$(() => {
 });
 
 export default component$(() => {
-  useStyles$(styles);
+  // useStyles$(styles);
   return (
     <div class="flex flex-col min-h-screen">
       <Header />
