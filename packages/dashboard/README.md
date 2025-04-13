@@ -30,6 +30,30 @@ Inside your project, you'll see the following directory structure:
 
 - `public`: Any static assets, like images, can be placed in the public directory. Please see the [Vite public directory](https://vitejs.dev/guide/assets.html#the-public-directory) for more info.
 
+## GitHub Authentication Setup
+
+This project uses GitHub OAuth for authentication. To set up GitHub authentication:
+
+1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
+2. Click on "New OAuth App" to create a new application
+3. Fill in the application details:
+   - Application name: "Many Repo Manager" (or your preferred name)
+   - Homepage URL: `http://localhost:5173` (for development)
+   - Authorization callback URL: `http://localhost:5173/auth/callback/github`
+4. Click "Register application"
+5. You'll receive a Client ID and need to generate a Client Secret
+6. Create a `.env` file in the root of the dashboard package with the following content:
+
+```
+AUTH_SECRET=your_random_secret_here
+AUTH_GITHUB_ID=your_github_client_id
+AUTH_GITHUB_SECRET=your_github_client_secret
+```
+
+Replace `your_random_secret_here` with a random string for session encryption, and use the Client ID and Client Secret from GitHub.
+
+**Important Note:** The callback URL in your GitHub OAuth app settings must match exactly what your application is using. For Qwik with Auth.js, the default callback URL is `/auth/callback/github` (not `/api/auth/callback/github` as mentioned in some documentation).
+
 ## Add Integrations and deployment
 
 Use the `npm run qwik add` command to add additional integrations. Some examples of integrations includes: Cloudflare, Netlify or Express Server, and the [Static Site Generator (SSG)](https://qwik.dev/qwikcity/guides/static-site-generation/).
@@ -63,3 +87,4 @@ The production build will generate client and server modules by running both cli
 ```shell
 npm run build # or `yarn build`
 ```
+
