@@ -1,49 +1,26 @@
-import {
-  component$,
-  useSignal,
-  useVisibleTask$,
-  $,
-  type Component,
-} from "@builder.io/qwik";
+import { component$, useSignal, useVisibleTask$, $ } from "@builder.io/qwik";
 import { useSession } from "~/routes/plugin@auth.ts";
-import { useNavigate } from "@builder.io/qwik-city";
+import { useNavigate, useLocation } from "@builder.io/qwik-city";
 import { Octokit } from "octokit";
-import {
-  Breadcrumb,
-  Card,
-  CardBody,
-  Skeleton,
-  Button,
-  Avatar,
-  Collapsible,
-} from "~/design-system";
+import { Breadcrumb, Card, CardBody, Avatar, Skeleton } from "~/design-system";
 import { RepoCard, type Repository } from "~/components/RepoCard";
-
-// Extend the User type to include accessToken
-declare module "@auth/core/types" {
-  interface User {
-    accessToken?: string;
-  }
-}
-
-interface GroupedRepositories {
-  [owner: string]: {
-    avatar_url: string;
-    repositories: Repository[];
-  };
-}
 
 export default component$(() => {
   const session = useSession();
   const navigate = useNavigate();
+  const location = useLocation();
+  const owner = location.params.owner;
 
   const repositories = useSignal<Repository[]>([]);
   const filteredRepositories = useSignal<Repository[]>([]);
-  const groupedRepositories = useSignal<GroupedRepositories>({});
   const loading = useSignal(true);
   const error = useSignal<string | null>(null);
   const selectedTopic = useSignal<string | null>(null);
-  const expandedOwners = useSignal<Set<string>>(new Set());
+  const ownerInfo = useSignal<{
+    name: string;
+    avatar_url: string;
+    bio: string | null;
+  } | null>(null);
 
   // Filter repositories by selected topic
   const filterRepositories = $(() => {
@@ -65,34 +42,6 @@ export default component$(() => {
     filterRepositories();
   });
 
-  const toggleOwner = $((owner: string) => {
-    const newExpandedOwners = new Set(expandedOwners.value);
-    if (newExpandedOwners.has(owner)) {
-      newExpandedOwners.delete(owner);
-    } else {
-      newExpandedOwners.add(owner);
-    }
-    expandedOwners.value = newExpandedOwners;
-  });
-
-  const groupRepositories = $((repos: Repository[]) => {
-    const grouped: GroupedRepositories = {};
-    for (const repo of repos) {
-      if (!grouped[repo.owner.login]) {
-        grouped[repo.owner.login] = {
-          avatar_url: "", // Default empty string since avatar_url is not in the type
-          repositories: [],
-        };
-      }
-      grouped[repo.owner.login].repositories.push(repo);
-    }
-    groupedRepositories.value = grouped;
-  });
-
-  const handleOwnerClick = $((owner: string) => {
-    navigate(`/repositories/${owner}`);
-  });
-
   useVisibleTask$(async () => {
     if (!session.value?.user) {
       navigate("/");
@@ -104,14 +53,28 @@ export default component$(() => {
         auth: session.value.user.accessToken,
       });
 
-      const { data } = await octokit.rest.repos.listForAuthenticatedUser({
+      try {
+        const { data: userData } = await octokit.rest.users.getByUsername({
+          username: owner,
+        });
+
+        ownerInfo.value = {
+          name: userData.name || userData.login,
+          avatar_url: userData.avatar_url,
+          bio: userData.bio,
+        };
+      } catch (userErr) {
+        console.error("Error fetching user data:", userErr);
+      }
+
+      const { data } = await octokit.rest.repos.listForUser({
+        username: owner,
         sort: "updated",
         direction: "desc",
       });
 
       repositories.value = data as Repository[];
       filteredRepositories.value = repositories.value;
-      groupRepositories(repositories.value);
     } catch (err) {
       error.value =
         err instanceof Error ? err.message : "Unknown error occurred";
@@ -122,7 +85,8 @@ export default component$(() => {
 
   const breadcrumbItems = [
     { label: "Home", href: "/" },
-    { label: "Repositories" },
+    { label: "Repositories", href: "/repositories" },
+    { label: owner },
   ];
 
   const skeletonItems = Array(6)
@@ -131,26 +95,62 @@ export default component$(() => {
       id: `skeleton-${i}`,
     }));
 
-  const OwnerTitle = component$<{ owner: string; avatar_url: string }>(
-    ({ owner, avatar_url }) => (
-      <div class="flex items-center space-x-3">
-        <Avatar
-          src={avatar_url}
-          alt={owner}
-          size="md"
-          fallback={owner[0].toUpperCase()}
-        />
-        <h3 class="text-lg font-semibold text-white">{owner}</h3>
-      </div>
-    )
-  );
-
   return (
     <div class="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 p-8">
       <div class="max-w-7xl mx-auto">
         <Breadcrumb items={breadcrumbItems} class="mb-6" />
 
-        <h2 class="text-lg font-bold text-white mb-6">Your Repositories</h2>
+        {loading.value ? (
+          <Card variant="elevated" class="mb-6">
+            <CardBody>
+              <div class="flex items-center">
+                <Skeleton
+                  variant="circular"
+                  width="3rem"
+                  height="3rem"
+                  class="mr-4"
+                />
+                <div class="flex-1">
+                  <Skeleton
+                    variant="text"
+                    height="1.5rem"
+                    width="60%"
+                    class="mb-2"
+                  />
+                  <Skeleton variant="text" height="1rem" width="80%" />
+                </div>
+              </div>
+            </CardBody>
+          </Card>
+        ) : ownerInfo.value ? (
+          <Card variant="elevated" class="mb-6">
+            <CardBody>
+              <div class="flex items-center">
+                <Avatar
+                  src={ownerInfo.value.avatar_url}
+                  alt={ownerInfo.value.name}
+                  size="lg"
+                  class="mr-4"
+                  fallback={ownerInfo.value.name}
+                />
+                <div>
+                  <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-600">
+                    {ownerInfo.value.name}
+                  </h1>
+                  {ownerInfo.value.bio && (
+                    <p class="text-gray-300 text-sm mt-1">
+                      {ownerInfo.value.bio}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </CardBody>
+          </Card>
+        ) : null}
+
+        <h2 class="text-lg font-bold text-white mb-6">
+          Repositories for {owner}
+        </h2>
 
         {loading.value ? (
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -188,32 +188,19 @@ export default component$(() => {
               <p class="text-gray-300 text-sm text-center">
                 {selectedTopic.value
                   ? `No repositories found with topic "${selectedTopic.value}"`
-                  : "No repositories found."}
+                  : "No repositories found for this user."}
               </p>
             </CardBody>
           </Card>
         ) : (
-          <div class="space-y-6">
-            {Object.entries(groupedRepositories.value).map(([owner, data]) => (
-              <Collapsible
-                key={owner}
-                title={
-                  <OwnerTitle owner={owner} avatar_url={data.avatar_url} />
-                }
-                subtitle={`${data.repositories.length} repositories`}
-                onTitleClick$={() => handleOwnerClick(owner)}
-              >
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {data.repositories.map((repo) => (
-                    <RepoCard
-                      key={repo.id}
-                      repo={repo}
-                      selectedTopic={selectedTopic.value}
-                      onTopicClick$={handleTopicClick}
-                    />
-                  ))}
-                </div>
-              </Collapsible>
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredRepositories.value.map((repo) => (
+              <RepoCard
+                key={repo.id}
+                repo={repo}
+                selectedTopic={selectedTopic.value}
+                onTopicClick$={handleTopicClick}
+              />
             ))}
           </div>
         )}
