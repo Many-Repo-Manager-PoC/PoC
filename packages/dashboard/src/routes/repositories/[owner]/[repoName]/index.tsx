@@ -1,9 +1,9 @@
 import {
   component$,
-  NoSerialize,
   noSerialize,
   useSignal,
   useVisibleTask$,
+  type NoSerialize,
 } from "@builder.io/qwik";
 import { useSession } from "~/routes/plugin@auth.ts";
 import { useNavigate, Link, useLocation } from "@builder.io/qwik-city";
@@ -346,6 +346,14 @@ const githubUtils = {
           );
         }
       }
+
+      // If rootContents is not an array, fall back to searching the entire repository
+      return await this.findPackagesInEntireRepo(
+        octokit,
+        owner,
+        repo,
+        defaultBranch
+      );
     } catch (err) {
       console.error("Error checking for packages directory:", err);
       // Fall back to searching the entire repository
