@@ -1,5 +1,5 @@
 import { component$ } from "@builder.io/qwik";
-import type { MonorepoPackage } from "~/types/repository";
+import type { MonorepoPackage } from "~/components/repository/repository";
 
 interface MonorepoPackagesSectionProps {
   packages: MonorepoPackage[];

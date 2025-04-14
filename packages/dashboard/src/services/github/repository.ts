@@ -2,7 +2,7 @@ import type {
   OctokitInstance,
   Repository,
   PackageJson,
-} from "~/types/repository";
+} from "~/components/repository/repository";
 
 /**
  * Fetch repository details from GitHub

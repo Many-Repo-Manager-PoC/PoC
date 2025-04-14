@@ -1,4 +1,7 @@
-import type { OctokitInstance, MonorepoPackage } from "~/types/repository";
+import type {
+  OctokitInstance,
+  MonorepoPackage,
+} from "~/components/repository/repository";
 
 /**
  * Find monorepo packages in packages directory

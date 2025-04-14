@@ -1,6 +1,6 @@
 import { component$ } from "@builder.io/qwik";
 import { Link } from "@builder.io/qwik-city";
-import type { Repository } from "~/types/repository";
+import type { Repository } from "~/components/repository/repository";
 
 interface DependentRepositoriesSectionProps {
   repositories: Repository[];

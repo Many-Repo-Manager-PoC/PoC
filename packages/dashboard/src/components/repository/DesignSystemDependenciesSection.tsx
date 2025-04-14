@@ -1,6 +1,6 @@
 import { component$ } from "@builder.io/qwik";
 import { Link } from "@builder.io/qwik-city";
-import type { DesignSystemDependency } from "~/types/repository";
+import type { DesignSystemDependency } from "~/components/repository/repository";
 
 interface DesignSystemDependenciesSectionProps {
   dependencies: DesignSystemDependency[];

@@ -2,7 +2,7 @@ import type {
   OctokitInstance,
   Repository,
   DesignSystemDependency,
-} from "~/types/repository";
+} from "~/components/repository/repository";
 import { fetchPackageJson, fetchRepository } from "./repository";
 
 /**

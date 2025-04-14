@@ -17,7 +17,7 @@ import type {
   MonorepoPackage,
   DesignSystemDependency,
   OctokitInstance,
-} from "~/types/repository";
+} from "~/components/repository/repository";
 import {
   fetchRepository,
   fetchPackageJson,
