@@ -79,7 +79,7 @@ export const RepoCard = component$<RepoCardProps>(
                     type="button"
                     key={topic}
                     onClick$={() => onTopicClick$?.(topic)}
-                    class="focus:outline-none"
+                    class="focus:outline-none cursor-pointer"
                   >
                     <Tag
                       variant="topic"

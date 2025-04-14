@@ -43,7 +43,7 @@ const BaseButton = component$<ButtonProps>(
     ...props
   }) => {
     const baseClasses =
-      "inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50";
+      "inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer";
 
     const variantClasses = {
       primary:
@@ -51,8 +51,9 @@ const BaseButton = component$<ButtonProps>(
       secondary:
         "bg-gray-200 text-gray-900 hover:bg-gray-300 focus-visible:ring-gray-500",
       outline:
-        "border border-gray-300 bg-transparent hover:bg-gray-100 focus-visible:ring-gray-500",
-      ghost: "bg-transparent hover:bg-gray-100 focus-visible:ring-gray-500",
+        "border border-gray-300 text-white bg-transparent hover:bg-gray-100 hover:text-black focus-visible:ring-gray-500",
+      ghost:
+        "bg-transparent text-white hover:bg-gray-100 hover:text-black focus-visible:ring-gray-500",
       danger:
         "bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500",
     };
