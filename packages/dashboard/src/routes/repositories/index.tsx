@@ -3,12 +3,10 @@ import {
   useSignal,
   useVisibleTask$,
   $,
-  type Component,
   sync$,
 } from "@builder.io/qwik";
 import { useSession } from "~/routes/plugin@auth.ts";
 import { useNavigate } from "@builder.io/qwik-city";
-import { Octokit } from "octokit";
 import {
   Breadcrumb,
   Card,
@@ -19,13 +17,7 @@ import {
   Collapsible,
 } from "~/components/design-system";
 import { RepoCard, type Repository } from "~/components/RepoCard";
-
-// Extend the User type to include accessToken
-declare module "@auth/core/types" {
-  interface User {
-    accessToken?: string;
-  }
-}
+import { Octokit } from "octokit";
 
 interface GroupedRepositories {
   [owner: string]: {
@@ -142,14 +134,17 @@ export default component$(() => {
   });
 
   useVisibleTask$(async () => {
-    if (!session.value?.user) {
-      navigate("/");
-      return;
-    }
-
     try {
+      // We know session is valid at this point (handled by layout)
+      // But we'll use optional chaining for type safety
+      const accessToken = session.value?.user?.accessToken;
+      if (!accessToken) {
+        error.value = "Authentication token not available";
+        return;
+      }
+
       const octokit = new Octokit({
-        auth: session.value.user.accessToken,
+        auth: accessToken,
       });
 
       const { data } = await octokit.rest.repos.listForAuthenticatedUser({
